@@ -16,19 +16,25 @@ struct ControlMessage: Codable {
     let fileCount: Int?
     let path: String?
     let data: String?
+    let watch: Bool?
+    let game: String?
+    let ok: Bool?
+    let ts: Double?
 
     init(type: String, key: String? = nil, x: Double? = nil, y: Double? = nil,
          dx: Double? = nil, dy: Double? = nil, text: String? = nil,
          screenWidth: Double? = nil, screenHeight: Double? = nil,
          quality: Int? = nil, fps: Int? = nil,
          resourceVersion: String? = nil, fileCount: Int? = nil,
-         path: String? = nil, data: String? = nil) {
+         path: String? = nil, data: String? = nil,
+         watch: Bool? = nil, game: String? = nil, ok: Bool? = nil, ts: Double? = nil) {
         self.type = type; self.key = key; self.x = x; self.y = y
         self.dx = dx; self.dy = dy; self.text = text
         self.screenWidth = screenWidth; self.screenHeight = screenHeight
         self.quality = quality; self.fps = fps
         self.resourceVersion = resourceVersion; self.fileCount = fileCount
         self.path = path; self.data = data
+        self.watch = watch; self.game = game; self.ok = ok; self.ts = ts
     }
 }
 

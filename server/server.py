@@ -1,42 +1,61 @@
-import asyncio, base64, io, json, logging, os, socket, time
+import asyncio, base64, ctypes, io, json, logging, os, socket, subprocess, sys, time
+from ctypes import wintypes
 from typing import Any
-import mss, pyautogui, websockets
+import mss, websockets
 from PIL import Image
-from pynput.keyboard import Controller as K, Key
 from zeroconf import ServiceInfo, Zeroconf
 
-logging.basicConfig(level=logging.INFO); log = logging.getLogger("SS")
-KBD = K(); M = pyautogui; M.FAILSAFE = False; M.PAUSE = 0; M.MINIMUM_DURATION = 0
-SW, SH = M.size()
+user32 = ctypes.windll.user32
+k32 = ctypes.windll.kernel32
+ctypes.windll.shcore.SetProcessDpiAwareness(1)
+STD_OUT = k32.GetStdHandle(-11); mode = ctypes.c_uint(0)
+if k32.GetConsoleMode(STD_OUT, ctypes.byref(mode)):
+    k32.SetConsoleMode(STD_OUT, mode.value | 0x0004)
 
-KM: dict[str, Key] = {
-    "return": Key.enter, "enter": Key.enter, "backspace": Key.backspace,
-    "delete": Key.delete, "space": Key.space, "tab": Key.tab, "escape": Key.esc,
-    "esc": Key.esc, "shift": Key.shift_l, "ctrl": Key.ctrl_l, "alt": Key.alt_l,
-    "cmd": Key.cmd_l, "up": Key.up, "down": Key.down, "left": Key.left, "right": Key.right,
-    "home": Key.home, "end": Key.end, "pageup": Key.page_up, "pagedown": Key.page_down,
-    "capslock": Key.caps_lock,
+SW, SH = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
+def m_move(x, y): user32.SetCursorPos(max(0, min(SW, int(x))), max(0, min(SH, int(y))))
+def m_down(): user32.mouse_event(2, 0, 0, 0, 0)
+def m_up(): user32.mouse_event(4, 0, 0, 0, 0)
+def m_click(): m_down(); m_up()
+def m_dclick(): m_click(); m_click()
+def m_rclick(): user32.mouse_event(8, 0, 0, 0, 0); user32.mouse_event(16, 0, 0, 0, 0)
+def m_scroll(dy): user32.mouse_event(0x0800, 0, 0, int(dy * 120), 0)
+def m_move_rel(dx, dy): user32.mouse_event(1, int(dx), int(dy), 0, 0)
+
+VK = {
+    "return":0x0D,"enter":0x0D,"backspace":0x08,"delete":0x2E,"space":0x20,"tab":0x09,
+    "escape":0x1B,"esc":0x1B,"shift":0x10,"ctrl":0x11,"alt":0x12,"cmd":0x5B,
+    "up":0x26,"down":0x28,"left":0x25,"right":0x27,"home":0x24,"end":0x23,
+    "pageup":0x21,"pagedown":0x22,"capslock":0x14,
 }
+for i in range(1,13): VK[f"f{i}"] = 0x6F+i-1
 
-def pk(k: str):
+def vk(k: str) -> int:
     k = k.lower()
-    if len(k) == 1: KBD.press(k)
-    elif k in KM: KBD.press(KM[k])
-    elif k.startswith("f") and k[1:].isdigit():
-        fk = getattr(Key, f"f{int(k[1:])}", None)
-        if fk: KBD.press(fk)
+    if k in VK: return VK[k]
+    if len(k) == 1:
+        v = user32.VkKeyScanW(ord(k))
+        return v & 0xFF if v != -1 else 0
+    return 0
 
-def rk(k: str):
-    k = k.lower()
-    if len(k) == 1: KBD.release(k)
-    elif k in KM: KBD.release(KM[k])
-    elif k.startswith("f") and k[1:].isdigit():
-        fk = getattr(Key, f"f{int(k[1:])}", None)
-        if fk: KBD.release(fk)
+def k_down(k: str): c = vk(k); user32.keybd_event(c, 0, 0, 0) if c else None
+def k_up(k: str): c = vk(k); user32.keybd_event(c, 0, 2, 0) if c else None
+def k_tap(k: str): k_down(k); time.sleep(0.008); k_up(k)
+def type_text(t: str):
+    for c in t:
+        v = user32.VkKeyScanW(ord(c))
+        if v != -1:
+            vb, sft = v & 0xFF, (v >> 8) & 1
+            if sft: k_down("shift")
+            user32.keybd_event(vb, 0, 0, 0)
+            user32.keybd_event(vb, 0, 2, 0)
+            if sft: k_up("shift")
+        time.sleep(0.004)
 
-def tk(k: str): pk(k); time.sleep(0.015); rk(k)
-
-SCT = mss.mss(); MON = SCT.monitors[1]; QUAL = 50; FPS = 60; LAST = 0.0
+SCT = mss.mss(); MON = SCT.monitors[1]
+QUAL, FPS, LAST, WATCH, INPUTS = 50, 60, 0.0, False, 0
+PING_TX, PING_RX = 0.0, 0.0
 
 RES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 RES_VER_FILE = os.path.join(RES_DIR, "version")
@@ -60,21 +79,61 @@ def get_res_files(base: str = "") -> list[dict]:
             files.extend(get_res_files(rp))
     return files
 
+def launch_game(exe: str):
+    try:
+        paths = [
+            exe,
+            os.path.expandvars(f"%LOCALAPPDATA%\\{exe}"),
+            os.path.expandvars(f"%PROGRAMFILES%\\{exe}"),
+            os.path.expandvars(f"%PROGRAMFILES(X86)%\\{exe}"),
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                subprocess.Popen([p], shell=True)
+                return True
+        subprocess.Popen([exe], shell=True)
+        return True
+    except: return False
+
+GAME_CMDS = {
+    "minecraft": r"MinecraftLauncher.exe",
+    "roblox": r"RobloxPlayerLauncher.exe",
+}
+
+logging.basicConfig(level=logging.INFO, format="%(message)s"); log = logging.getLogger("SS")
+
+def dashboard():
+    fps_s = "OFF" if WATCH else f"{FPS}fps"
+    print(f"\033[H\033[J╔══════════════════════════════════════╗")
+    print(f"║  \033[36mStream Server v3.0\033[0m {'':24s}║")
+    print(f"║  \033[90m{socket.gethostname()} @ {lip()}:8765\033[0m {'':16s}║")
+    print(f"╠══════════════════════════════════════╣")
+    print(f"║  Screen: {SW}x{SH}{'':26s}║")
+    print(f"║  Quality: {QUAL}  |  FPS: {fps_s}{'':14s}║")
+    print(f"║  Mode: {'WATCH' if WATCH else 'GAME'}{'':26s}║")
+    print(f"║  Inputs: {INPUTS}{'':34s}║")
+    print(f"╚══════════════════════════════════════╝")
+
 async def stream(ws):
-    global LAST
+    global LAST, QUAL, FPS
     try:
         while True:
             n = time.time(); iv = 1.0 / FPS; e = n - LAST
             if e < iv: await asyncio.sleep(iv - e)
             LAST = time.time()
+            try:
+                img = Image.frombytes("RGB", SCT.grab(MON).size, SCT.grab(MON).rgb)
+            except: continue
             buf = io.BytesIO()
-            Image.frombytes("RGB", SCT.grab(MON).size, SCT.grab(MON).rgb).save(buf, format="JPEG", quality=QUAL, optimize=True)
-            try: await ws.send(buf.getvalue())
-            except websockets.exceptions.ConnectionClosed: break
+            img.save(buf, format="JPEG", quality=QUAL, optimize=True)
+            try:
+                await ws.send(buf.getvalue())
+            except websockets.exceptions.ConnectionClosed:
+                break
     except asyncio.CancelledError: pass
 
 async def handler(ws):
-    global QUAL, FPS
+    global QUAL, FPS, WATCH, INPUTS, PING_TX, PING_RX
     a = ws.remote_address; log.info("Client: %s", a)
     st = None
     try:
@@ -83,26 +142,45 @@ async def handler(ws):
         async for r in ws:
             try: m: dict[str,Any] = json.loads(r)
             except json.JSONDecodeError: continue
+            if WATCH and m.get("type") not in ("ping","pong","check_resources","request_update","set_performance"):
+                continue
             t = m.get("type")
-            if t == "mouse_move": M.moveTo(max(0,min(SW,m["x"])), max(0,min(SH,m["y"])), duration=0)
-            elif t == "mouse_move_relative": M.moveRel(m["dx"], m["dy"], duration=0)
-            elif t == "mouse_click": M.click()
-            elif t == "mouse_doubleclick": M.doubleClick()
-            elif t == "mouse_rightclick": M.rightClick()
-            elif t == "mouse_scroll": M.scroll(0, m["dy"])
-            elif t == "key_down": pk(m.get("key",""))
-            elif t == "key_up": rk(m.get("key",""))
-            elif t == "key_tap": tk(m.get("key",""))
-            elif t == "type_text": KBD.type(m.get("text",""))
+            INPUTS += 1
+            if t == "mouse_move": m_move(m["x"], m["y"])
+            elif t == "mouse_move_relative": m_move_rel(m["dx"], m["dy"])
+            elif t == "mouse_click": m_click()
+            elif t == "mouse_doubleclick": m_dclick()
+            elif t == "mouse_rightclick": m_rclick()
+            elif t == "mouse_scroll": m_scroll(m["dy"])
+            elif t == "key_down": k_down(m.get("key",""))
+            elif t == "key_up": k_up(m.get("key",""))
+            elif t == "key_tap": k_tap(m.get("key",""))
+            elif t == "type_text": type_text(m.get("text",""))
             elif t == "ping":
-                try: await ws.send(json.dumps({"type":"pong"}))
+                PING_TX = time.time()
+                try: await ws.send(json.dumps({"type":"pong","ts":PING_TX}))
                 except: break
+            elif t == "pong":
+                PING_RX = time.time() - m.get("ts", PING_RX)
             elif t == "set_performance":
                 nq = m.get("quality", QUAL); nf = m.get("fps", FPS)
                 if nq != QUAL or nf != FPS:
                     QUAL = max(10, min(90, nq)); FPS = max(10, min(60, nf))
-                    log.info("Perf: q=%s fps=%s", QUAL, FPS)
                     if st: st.cancel(); st = asyncio.create_task(stream(ws))
+                    dashboard()
+            elif t == "set_mode":
+                WATCH = m.get("watch", False)
+                if WATCH:
+                    QUAL = max(QUAL, 70); FPS = max(FPS, 30)
+                else:
+                    QUAL = min(QUAL, 50)
+                if st: st.cancel(); st = asyncio.create_task(stream(ws))
+                dashboard()
+            elif t == "launch_game":
+                game = m.get("game", "")
+                if game in GAME_CMDS:
+                    ok = launch_game(GAME_CMDS[game])
+                    await ws.send(json.dumps({"type":"game_launched","game":game,"ok":ok}))
             elif t == "check_resources":
                 cv = m.get("resource_version", "0")
                 sv = get_res_version()
@@ -119,6 +197,7 @@ async def handler(ws):
                     await ws.send(json.dumps({"type":"update_file","path":f["path"],"data":f["data"],"resource_version":sv}))
                 await ws.send(json.dumps({"type":"update_complete","resource_version":sv}))
                 st = asyncio.create_task(stream(ws))
+                dashboard()
     except websockets.exceptions.ConnectionClosed: log.info("Disconnected: %s", a)
     except Exception as e: log.error("Error: %s", e)
     finally:
@@ -132,20 +211,22 @@ def bonjour(p: int) -> Zeroconf | None:
     try:
         h = socket.gethostname(); i = lip()
         info = ServiceInfo("_stream._tcp.local.", f"{h}._stream._tcp.local.", [socket.inet_aton(i)], p, {"v":"3.0","rv":get_res_version()}, f"{h}.local.")
-        z = Zeroconf(); z.register_service(info); log.info("Bonjour: %s @ %s:%s", h, i, p); return z
-    except Exception as e: log.warning("Bonjour: %s", e); return None
+        z = Zeroconf(); z.register_service(info); return z
+    except: return None
 
 async def main():
     p = 8765; i = lip()
-    print(); log.info("="*42); log.info("  Stream Server v3.0"); log.info("  IP: %s:%s", i, p); log.info("  Screen: %sx%s", SW, SH); log.info("  Up to 60 FPS"); log.info("="*42); print()
+    print(f"\033[?25l", end="")
+    dashboard()
     z = bonjour(p)
     try:
         async with websockets.serve(handler, "0.0.0.0", p, max_size=15_000_000, max_queue=64, write_limit=4_000_000):
-            log.info("Ready..."); await asyncio.Future()
+            await asyncio.Future()
     finally:
+        print(f"\033[?25h", end="")
         if z: z.unregister_all_services(); z.close()
         SCT.close()
 
 if __name__ == "__main__":
     try: asyncio.run(main())
-    except KeyboardInterrupt: log.info("Stopped")
+    except KeyboardInterrupt: pass

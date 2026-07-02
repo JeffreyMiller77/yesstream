@@ -2,6 +2,11 @@ import UIKit
 
 enum ConnectionState { case disconnected, connecting, connected }
 
+struct GameLaunchResult {
+    let game: String
+    let ok: Bool
+}
+
 class NetworkService: ObservableObject {
     private var webSocket: URLSessionWebSocketTask?
     private let encoder = JSONEncoder()
@@ -20,6 +25,10 @@ class NetworkService: ObservableObject {
     @Published var targetQuality: Int = 50
     @Published var targetFPS: Int = 60
     @Published var updateState: UpdateManager.UpdateState = .idle
+    @Published var pingMs: Double = 0
+    @Published var watchMode = false
+    @Published var selectedGame = "default"
+    @Published var gameLaunchResult: GameLaunchResult?
 
     private var frameCount = 0
     private var lastFrameTime = Date()
@@ -93,6 +102,15 @@ class NetworkService: ObservableObject {
         send(ControlMessage(type: "request_update"))
     }
 
+    func setWatchMode(_ on: Bool) {
+        watchMode = on
+        send(ControlMessage(type: "set_mode", watch: on))
+    }
+
+    func launchGame(_ game: String) {
+        send(ControlMessage(type: "launch_game", game: game))
+    }
+
     private func receiveMessage() {
         webSocket?.receive { [weak self] r in
             guard let self = self else { return }
@@ -146,7 +164,11 @@ class NetworkService: ObservableObject {
                             self.updateManager.finalizeUpdate(version: ver)
                             self.updateState = .done(version: ver)
                         case "pong":
-                            break
+                            if let ts = msg.ts {
+                                self.pingMs = (Date().timeIntervalSince1970 - ts) * 1000
+                            }
+                        case "game_launched":
+                            self.gameLaunchResult = GameLaunchResult(game: msg.game ?? "?", ok: msg.ok ?? false)
                         default:
                             break
                         }

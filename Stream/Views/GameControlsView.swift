@@ -3,12 +3,24 @@ import SwiftUI
 struct GameControlsView: View {
     @ObservedObject var networkService: NetworkService
     let screenSize: CGSize
+    let game: String
     @AppStorage("mouseSensitivity") private var sensitivity: Double = 1.0
 
     @State private var activeWASD = Set<String>()
     @State private var wasdOff = CGSize.zero
     private let stickR: CGFloat = 55
     private let deadZ: CGFloat = 15
+
+    private var layout: [(String, String)] {
+        switch game {
+        case "minecraft":
+            return [("Jump","space"),("Sprint","shift"),("Crouch","ctrl"),("Inventory","e"),("Attack","mouse_click")]
+        case "roblox":
+            return [("Jump","space"),("Sprint","shift"),("Crouch","ctrl"),("Interact","e"),("Tool","q")]
+        default:
+            return [("Jump","space"),("Sprint","shift"),("Crouch","ctrl"),("Interact","e")]
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -75,11 +87,18 @@ struct GameControlsView: View {
 
     private var actionButtons: some View {
         HStack(spacing: 10) {
-            ForEach([("Jump","space"),("Sprint","shift"),("Crouch","ctrl"),("Interact","e")], id: \.0) { l,k in
-                Text(l).font(.system(size: 9, weight: .semibold)).foregroundColor(.white)
-                    .frame(width: 58, height: 36).background(Color.black.opacity(0.4)).cornerRadius(8)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.15), lineWidth: 1))
-                    .onTouchDownUp({ networkService.sendKeyDown(k) }, { networkService.sendKeyUp(k) })
+            ForEach(layout, id: \.0) { l,k in
+                if k == "mouse_click" {
+                    Text(l).font(.system(size: 9, weight: .semibold)).foregroundColor(.white)
+                        .frame(width: 58, height: 36).background(Color.blue.opacity(0.4)).cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.15), lineWidth: 1))
+                        .onTouchDownUp({ networkService.sendKeyDown("attack") }, { networkService.sendClick() })
+                } else {
+                    Text(l).font(.system(size: 9, weight: .semibold)).foregroundColor(.white)
+                        .frame(width: 58, height: 36).background(Color.black.opacity(0.4)).cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.15), lineWidth: 1))
+                        .onTouchDownUp({ networkService.sendKeyDown(k) }, { networkService.sendKeyUp(k) })
+                }
             }
         }.padding(.horizontal, 8)
     }

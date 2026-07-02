@@ -6,28 +6,38 @@ struct DesktopControlsView: View {
     @AppStorage("mouseSensitivity") private var sensitivity: Double = 1.0
 
     @State private var lastTap = Date.distantPast
-    @State private var down = false
-    @State private var taps = 0
+    @State private var touchCount = 0
     @State private var flash = false
+    @State private var isDown = false
+    @State private var accumulated = CGSize.zero
+    @State private var lastDrag = CGSize.zero
+    @State private var scrollMode = false
 
     var body: some View {
         Color.clear
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { v in
-                    let x = (v.location.x / screenSize.width) * networkService.screenWidth * sensitivity
-                    let y = ((v.location.y - 50) / (screenSize.height - 100)) * networkService.screenHeight * sensitivity
-                    networkService.sendMouseMove(x: max(0, min(networkService.screenWidth, x)), y: max(0, min(networkService.screenHeight, y)))
-                    if !down {
-                        down = true; let n = Date()
-                        if n.timeIntervalSince(lastTap) < 0.3 { taps += 1; if taps >= 2 { networkService.sendClick(); taps = 0; flashNow() } }
-                        else { taps = 1 }; lastTap = n
+                    if v.numberOfTouchPoints > 1 {
+                        if !scrollMode { scrollMode = true; accumulated = .zero }
+                        let d = CGSize(width: v.translation.width - lastDrag.width,
+                                       height: v.translation.height - lastDrag.height)
+                        networkService.sendScroll(dy: d.height * 0.5)
+                    } else if !scrollMode {
+                        let accel = 0.6 + sensitivity * 0.8
+                        let dx = (v.translation.width - lastDrag.width) * accel
+                        let dy = (v.translation.height - lastDrag.height) * accel
+                        networkService.sendRelativeMove(dx: dx, dy: dy)
                     }
+                    lastDrag = v.translation
+                    if !isDown { isDown = true; tapCheck() }
                 }
                 .onEnded { _ in
-                    down = false; let n = Date()
-                    if n.timeIntervalSince(lastTap) < 0.3 && taps == 1 { networkService.sendClick(); flashNow() }
-                    taps = 0
+                    isDown = false; scrollMode = false
+                    accumulated = .zero; lastDrag = .zero
+                    let n = Date()
+                    if n.timeIntervalSince(lastTap) < 0.3 && touchCount == 1 { networkService.sendClick(); flashNow() }
+                    touchCount = 0
                 }
             )
             .overlay(alignment: .center) {
@@ -36,12 +46,19 @@ struct DesktopControlsView: View {
             .overlay(alignment: .center) {
                 VStack(spacing: 6) {
                     Image(systemName: "hand.point.up.fill").font(.system(size: 36)).foregroundColor(.white.opacity(0.3))
-                    Text("Touch to move cursor").font(.caption).foregroundColor(.white.opacity(0.3))
-                    Text("Tap to click  ·  Double-tap = double-click").font(.caption2).foregroundColor(.white.opacity(0.2))
+                    Text("Drag to move cursor").font(.caption).foregroundColor(.white.opacity(0.3))
+                    Text("Two fingers to scroll").font(.caption2).foregroundColor(.white.opacity(0.2))
                 }
                 .allowsHitTesting(false)
                 .opacity(networkService.currentFrame != nil ? 0 : 1)
             }
+    }
+
+    private func tapCheck() {
+        let n = Date()
+        if n.timeIntervalSince(lastTap) < 0.3 { touchCount += 1; if touchCount >= 2 { networkService.sendDoubleClick(); flashNow(); touchCount = 0 } }
+        else { touchCount = 1 }
+        lastTap = n
     }
 
     private func flashNow() {

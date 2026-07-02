@@ -1,0 +1,19 @@
+{
+  "name": "Minecraft",
+  "executable": "MinecraftLauncher.exe",
+  "bindings": {
+    "w": "forward", "a": "left", "s": "back", "d": "right",
+    "space": "jump", "shift": "sneak", "ctrl": "sprint",
+    "e": "inventory", "q": "drop", "1": "hotbar_1", "2": "hotbar_2",
+    "3": "hotbar_3", "4": "hotbar_4", "5": "hotbar_5",
+    "6": "hotbar_6", "7": "hotbar_7", "8": "hotbar_8", "9": "hotbar_9"
+  },
+  "buttons": [
+    {"label": "Jump", "key": "space"},
+    {"label": "Sprint", "key": "ctrl"},
+    {"label": "Sneak", "key": "shift"},
+    {"label": "Inventory", "key": "e"},
+    {"label": "Drop", "key": "q"}
+  ],
+  "sensitivity": 0.6
+}
