@@ -3,7 +3,9 @@ import SwiftUI
 struct ConnectView: View {
     @ObservedObject var networkService: NetworkService
     @StateObject private var discovery = ServerDiscovery()
-    @State private var manualIP = "", manualPort = "8765", manualName = ""
+    @State private var manualIP = ""
+    @State private var manualPort = "8765"
+    @State private var manualName = ""
     @State private var showManual = false
 
     var body: some View {
@@ -15,6 +17,7 @@ struct ConnectView: View {
                     Text("v3 – PC Remote").foregroundColor(.secondary).font(.subheadline)
                     if networkService.connectionState == .connecting { ProgressView("Connecting...") }
                     if let e = networkService.errorMessage { Text(e).foregroundColor(.red).font(.caption) }
+                    updateStatusView
                 }.frame(maxWidth: .infinity).padding(.vertical, 8)
             }
 
@@ -85,6 +88,39 @@ struct ConnectView: View {
         .listStyle(.insetGrouped)
         .onAppear { discovery.startSearching() }
         .onDisappear { discovery.stopSearching() }
+        .alert("Resources Update Available", isPresented: $showUpdateAlert, actions: {
+            Button("Update Now") { networkService.requestUpdate() }
+            Button("Later", role: .cancel) { }
+        }, message: {
+            if case .available(let sv, let fc) = networkService.updateState {
+                Text("Version \(sv) (\(fc) files) is available. Update now?")
+            } else {
+                Text("A new version is available.")
+            }
+        })
+    }
+
+    @ViewBuilder
+    private var updateStatusView: some View {
+        switch networkService.updateState {
+        case .downloading(let current, let total):
+            VStack(spacing: 4) {
+                ProgressView(value: Double(current), total: Double(total))
+                    .progressViewStyle(.linear)
+                Text("Updating resources... \(current)/\(total)").font(.caption).foregroundColor(.secondary)
+            }.padding(.top, 6)
+        case .done(let v):
+            Text("Resources updated to v\(v)").font(.caption).foregroundColor(.green).padding(.top, 4)
+        default:
+            EmptyView()
+        }
+    }
+
+    private var showUpdateAlert: Binding<Bool> {
+        Binding {
+            if case .available = networkService.updateState { return true }
+            return false
+        } set: { if !$0 { networkService.updateState = .idle } }
     }
 
     private func connectTo(ip: String, port: Int) {

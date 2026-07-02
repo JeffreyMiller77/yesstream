@@ -1,0 +1,8 @@
+{
+  "streamQuality": 50,
+  "streamFPS": 60,
+  "mouseSensitivity": 1.0,
+  "qualityRange": [10, 90],
+  "fpsRange": [15, 60],
+  "sensitivityRange": [0.2, 3.0]
+}

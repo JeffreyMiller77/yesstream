@@ -1,0 +1,11 @@
+{
+  "presets": [
+    {
+      "name": "WASD",
+      "bindings": {
+        "w": "up", "a": "left", "s": "down", "d": "right",
+        "space": "jump", "shift": "sprint", "ctrl": "crouch"
+      }
+    }
+  ]
+}

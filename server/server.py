@@ -1,4 +1,4 @@
-import asyncio, io, json, logging, socket, time
+import asyncio, base64, io, json, logging, os, socket, time
 from typing import Any
 import mss, pyautogui, websockets
 from PIL import Image
@@ -37,6 +37,28 @@ def rk(k: str):
 def tk(k: str): pk(k); time.sleep(0.015); rk(k)
 
 SCT = mss.mss(); MON = SCT.monitors[1]; QUAL = 50; FPS = 60; LAST = 0.0
+
+RES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
+RES_VER_FILE = os.path.join(RES_DIR, "version")
+
+def get_res_version() -> str:
+    try:
+        with open(RES_VER_FILE) as f: return f.read().strip()
+    except: return "0"
+
+def get_res_files(base: str = "") -> list[dict]:
+    files = []
+    pfx = os.path.join(RES_DIR, base) if base else RES_DIR
+    if not os.path.isdir(pfx): return files
+    for e in os.listdir(pfx):
+        fp = os.path.join(pfx, e)
+        rp = os.path.join(base, e) if base else e
+        if os.path.isfile(fp):
+            with open(fp, "rb") as f:
+                files.append({"path": rp.replace(os.sep, "/"), "data": base64.b64encode(f.read()).decode()})
+        elif os.path.isdir(fp):
+            files.extend(get_res_files(rp))
+    return files
 
 async def stream(ws):
     global LAST
@@ -81,6 +103,22 @@ async def handler(ws):
                     QUAL = max(10, min(90, nq)); FPS = max(10, min(60, nf))
                     log.info("Perf: q=%s fps=%s", QUAL, FPS)
                     if st: st.cancel(); st = asyncio.create_task(stream(ws))
+            elif t == "check_resources":
+                cv = m.get("resource_version", "0")
+                sv = get_res_version()
+                if cv == sv:
+                    await ws.send(json.dumps({"type":"up_to_date","resource_version":sv}))
+                else:
+                    files = get_res_files()
+                    await ws.send(json.dumps({"type":"update_available","resource_version":sv,"fileCount":len(files)}))
+            elif t == "request_update":
+                sv = get_res_version(); files = get_res_files()
+                if st: st.cancel(); st = None
+                await ws.send(json.dumps({"type":"update_start","resource_version":sv,"fileCount":len(files)}))
+                for f in files:
+                    await ws.send(json.dumps({"type":"update_file","path":f["path"],"data":f["data"],"resource_version":sv}))
+                await ws.send(json.dumps({"type":"update_complete","resource_version":sv}))
+                st = asyncio.create_task(stream(ws))
     except websockets.exceptions.ConnectionClosed: log.info("Disconnected: %s", a)
     except Exception as e: log.error("Error: %s", e)
     finally:
@@ -93,7 +131,7 @@ def lip():
 def bonjour(p: int) -> Zeroconf | None:
     try:
         h = socket.gethostname(); i = lip()
-        info = ServiceInfo("_stream._tcp.local.", f"{h}._stream._tcp.local.", [socket.inet_aton(i)], p, {"v":"3.0"}, f"{h}.local.")
+        info = ServiceInfo("_stream._tcp.local.", f"{h}._stream._tcp.local.", [socket.inet_aton(i)], p, {"v":"3.0","rv":get_res_version()}, f"{h}.local.")
         z = Zeroconf(); z.register_service(info); log.info("Bonjour: %s @ %s:%s", h, i, p); return z
     except Exception as e: log.warning("Bonjour: %s", e); return None
 

@@ -8,6 +8,8 @@ class NetworkService: ObservableObject {
     private let decoder = JSONDecoder()
     private var pingTimer: Timer?
     private var isActive = false
+    let updateManager = UpdateManager()
+    private var pendingFiles: Int = 0
 
     @Published var connectionState: ConnectionState = .disconnected
     @Published var screenWidth: Double = 1920
@@ -17,6 +19,7 @@ class NetworkService: ObservableObject {
     @Published var errorMessage: String?
     @Published var targetQuality: Int = 50
     @Published var targetFPS: Int = 60
+    @Published var updateState: UpdateManager.UpdateState = .idle
 
     private var frameCount = 0
     private var lastFrameTime = Date()
@@ -81,6 +84,15 @@ class NetworkService: ObservableObject {
     func sendTap(_ k: String) { send(ControlMessage(type: "key_tap", key: k)) }
     func sendText(_ t: String) { send(ControlMessage(type: "type_text", text: t)) }
 
+    func checkResources() {
+        send(ControlMessage(type: "check_resources", resourceVersion: updateManager.currentVersion))
+    }
+
+    func requestUpdate() {
+        pendingFiles = 0
+        send(ControlMessage(type: "request_update"))
+    }
+
     private func receiveMessage() {
         webSocket?.receive { [weak self] r in
             guard let self = self else { return }
@@ -88,8 +100,9 @@ class NetworkService: ObservableObject {
             case .success(let m):
                 switch m {
                 case .data(let d):
-                    if let img = UIImage(data: d) {
-                        DispatchQueue.main.async {
+                    DispatchQueue.main.async {
+                        if case .downloading = self.updateState { return }
+                        if let img = UIImage(data: d) {
                             self.currentFrame = img
                             self.frameCount += 1
                             let now = Date()
@@ -105,12 +118,37 @@ class NetworkService: ObservableObject {
                     guard let d = t.data(using: .utf8),
                           let msg = try? self.decoder.decode(ControlMessage.self, from: d) else { break }
                     DispatchQueue.main.async {
-                        if msg.type == "connected" {
+                        switch msg.type {
+                        case "connected":
                             if let w = msg.screenWidth { self.screenWidth = w }
                             if let h = msg.screenHeight { self.screenHeight = h }
                             self.connectionState = .connected
                             self.errorMessage = nil
                             self.sendPerformanceSettings()
+                            self.checkResources()
+                        case "up_to_date":
+                            self.updateState = .idle
+                        case "update_available":
+                            let sv = msg.resourceVersion ?? "?"
+                            self.updateState = .available(serverVersion: sv, fileCount: msg.fileCount ?? 0)
+                        case "update_start":
+                            self.pendingFiles = 0
+                            self.updateState = .downloading(current: 0, total: msg.fileCount ?? 0)
+                        case "update_file":
+                            if let path = msg.path, let data = msg.data {
+                                _ = self.updateManager.applyFile(path: path, base64Data: data)
+                            }
+                            if case .downloading(let cur, let total) = self.updateState {
+                                self.updateState = .downloading(current: cur + 1, total: total)
+                            }
+                        case "update_complete":
+                            let ver = msg.resourceVersion ?? self.updateManager.currentVersion
+                            self.updateManager.finalizeUpdate(version: ver)
+                            self.updateState = .done(version: ver)
+                        case "pong":
+                            break
+                        default:
+                            break
                         }
                     }
                 @unknown default: break
