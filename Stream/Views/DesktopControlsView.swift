@@ -18,7 +18,9 @@ struct DesktopControlsView: View {
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { v in
-                    if v.numberOfTouchPoints > 1 {
+                    // DragGesture.Value does not expose the number of touch points.
+                    // Use the internal touch counter as a simple heuristic for multi-touch.
+                    if touchCount > 1 {
                         if !scrollMode { scrollMode = true; accumulated = .zero }
                         let d = CGSize(width: v.translation.width - lastDrag.width,
                                        height: v.translation.height - lastDrag.height)
