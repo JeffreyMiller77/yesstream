@@ -88,7 +88,7 @@ struct ConnectView: View {
         .listStyle(.insetGrouped)
         .onAppear { discovery.startSearching() }
         .onDisappear { discovery.stopSearching() }
-        .alert("Resources Update Available", isPresented: $showUpdateAlert, actions: {
+        .alert("Resources Update Available", isPresented: showUpdateAlert, actions: {
             Button("Update Now") { networkService.requestUpdate() }
             Button("Later", role: .cancel) { }
         }, message: {
