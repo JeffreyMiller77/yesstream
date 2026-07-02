@@ -39,7 +39,7 @@ struct StreamView: View {
             }
             .overlay(alignment: .bottomLeading) { gameStrip }
             .sheet(isPresented: $showSettings) { SettingsView(networkService: networkService) }
-            .alert("Game Launched", isPresented: $showLaunchAlert, actions: { Button("OK") { } }, message: {
+            .alert("Game Launched", isPresented: showLaunchAlert, actions: { Button("OK") { } }, message: {
                 Text(networkService.gameLaunchResult?.ok == true ? "Game opened on PC" : "Could not launch game")
             })
             .confirmationDialog("Select Game Profile", isPresented: $showGamePicker, titleVisibility: .visible) {
